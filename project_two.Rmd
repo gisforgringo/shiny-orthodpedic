@@ -1,0 +1,346 @@
+---
+title: 'Project Two: Biomechanical Features of Orthopedic Patients'
+author: "chris mathew"
+date: "27 March 2021"
+output:
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+## install standard libararies
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(knitr)
+```
+
+
+# Introduction
+
+This report is my second submission for the capstone project for *HarvardX PH125.9x*. For this project we chose our own dataset and objectives. I use a curated dataset from *Kaggle*, which is used to predict medical conditions. My obective is to build a ensemble-based predictor and investigate if this predictor performs better than the individual constituent models.
+
+I was motivated to do this becuase I wanted to do something that was related to medecine.
+
+## Description of the dataset
+
+```{r classes, features, r, c, echo=FALSE}
+## download data
+url_file <- 'https://raw.github.com/gisforgringo/harvard/master/column_3C_weka.csv'
+
+df <-read.csv(url_file)
+y<-df$class
+x<- df[ , 1:6]
+classes <- unique(y)
+features <- names(x)
+r <- nrow(x)
+c <- ncol(x)
+```
+The data is sourced from one of Kaggle's curated datasets: [Biomechanical features of orthopedic patients](https://www.kaggle.com/uciml/biomechanical-features-of-orthopedic-patients?select=column_3C_weka.csv).
+
+and for convenince it has been re-uploaded to my [personal github](https://raw.github.com/gisforgringo/harvard/master/column_3C_weka.csv).
+
+The dataset is used for predicting various medical conditions. There are `r r` obsersavations of `r c` numeric features. The features are:
+
+   - `r features[1]`
+   - `r features[2]`
+   - `r features[3]`
+   - `r features[4]`
+   - `r features[5]`
+   - `r features[6]`
+  
+These are used to to predict a patient's condition as `r classes[1]`, `r classes[2] ` or `r classes[3]`. These have the following frequencies:
+
+```{r echo = FALSE}
+## show counts of each class
+kable(df %>% group_by(class) %>% summarize(n()), caption = 'Counts of Class')
+```
+
+A sample of the dataset and histograms of the features are shown below:
+
+```{r echo=FALSE}
+## show head and summary plots
+kable(head(df), caption = 'Sample of dataset')
+ggplot(gather(x), aes(value)) + 
+    geom_histogram(bins = 10) + 
+    facet_wrap(~key, scales = 'free_x')
+```
+
+## Goal of the Project
+
+This project has three goals:
+
+  1. To construct multiple machine learning models for predicing a patient's condition.
+  2. To use these models to build an ensemble model.
+  3. To investigate whether this ensemble model performs better or worse than the individual models.
+  
+## Key steps
+
+The following key steps are performed:
+
+ - Pre-process to create test and training sets.
+ 
+ - Construct multiple machine learning models.
+ 
+ - Construct an ensemble model from the models above.
+ 
+ - Final evaluation of ensemble vs. individual models.
+ 
+# Methods and Analysis
+
+## Pre-Processing
+
+In this section I pre-process the data to create test and training sets (**test_set** and **train_set**, respectively). The training comprises 75% of the full dataset; the test_set comprises the remaining 25 percent.
+``` {r warning=FALSE, message=FALSE, echo = FALSE}
+## Set seed to ensure reproducability
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y, times = 1, p = 0.25, list = FALSE)
+train_set <- df[-test_index,]
+test_set <- df[test_index,]
+```
+
+## Modelling Approach
+
+I build the following machine learning models:
+
+  1. Naive Bayes
+  2. Linear Discriminant Analysis (LDA)
+  3. K-Nearest Neighbours (KNN)
+  4. Support Vector Machines (SVMs)
+  5. Decision Tree
+  6. Random Forest
+ 
+For each of these models I train (and optimize where relevent) on the **train_set** and evaluate its accuracy on the **test_set**. Each of these are models are discussed in turn below.
+
+### 1. Naive Bayes
+
+I train the Naive Bayes model below:
+``` {r acc_nb, warning=FALSE, message=FALSE, echo=TRUE}
+## Train Naive Bayes Model
+train_nb <- train(class ~ ., method = 'naive_bayes', data = train_set)
+## see how accurate this model is
+y_hat_nb <- predict(train_nb, test_set, type = "raw")
+acc_nb <- mean(y_hat_nb ==test_set$class)
+acc_results <- data_frame(method = "Naive Bayes", Accuracy = acc_nb)
+```
+
+The Naive Bayes model achieves `r acc_nb` accuracy on the **test_set**.
+
+### 2. Linear Discriminant Analysis (LDA)
+
+I train the LDA model below:
+```{r acc_lda, warning=FALSE, message=FALSE}
+## Train LDA
+fit_lda <- train(class ~ ., data = train_set, method = 'lda')
+y_hat_lda <- predict(fit_lda, test_set)
+##Evaluate Accuracy
+acc_lda <- mean(y_hat_lda ==test_set$class)
+```
+The LDA model achieves `r acc_lda` accuracy on the **test_set**.
+
+### 3. K-Nearest Nieghbours (KNN)
+
+I train the KNN model below and optimize K on the **train_set** from 2 to 50, as shown in the plot below.
+``` {r best_k, acc_knn, acc_knn_train, fig.align="center"}
+#optize over K on train_set
+train_knn <- train(class ~ ., method = "knn", data = train_set,
+                   tuneGrid = data.frame(k = seq(2, 50, 1)))
+ggplot(train_knn, highlight = TRUE)
+
+# get best k
+best_k <- train_knn$bestTune$k
+y_hat_knn <- predict(train_knn, test_set, type = "raw")
+acc_knn <- mean(y_hat_knn == test_set$class)
+
+#get train set accuracy
+y_hat_knn_train <- predict(train_knn, train_set, type = "raw")
+acc_knn_train <- mean(y_hat_knn_train ==train_set$class)
+```
+The optimal value for K is `r best_k`. This model has accuracy of `r acc_knn` on the **test_set**.
+
+### 4. Support Vector Machines (SVM)
+``` {r kernels, echo = FALSE}
+# define 3 different kernels
+kernels <- c('linear','polynomial','radial')
+```
+I estimate 3 SVM models each with a different kernel: `r kernels`. I optimse by selecting the kernel with higest accuracy on the **train_set**.
+``` {r svms, kernel, warning=FALSE, message=FALSE}
+## Instal libray for SVMs
+if(!require(e1071)) install.packages("e1071", repos = "http://cran.us.r-project.org")
+library(e1071)
+
+# define function for SVM
+est_svm <- function(k){
+    svm_fit = svm(formula = class ~ .,
+                 data = train_set,
+                 type = 'C-classification',
+                 kernel = k)
+
+    y_hat = predict(svm_fit,train_set)
+    mean(y_hat==train_set$class)
+    
+}
+
+# estimate SVM for each kernel type
+svms<- sapply(kernels, est_svm)
+
+# choose kernel that maximises train_set accuracy
+idx <-which.max(svms)
+kernel <- kernels[idx]
+```
+
+```{r echo =FALSE}
+kable(svms, caption = 'SVM: Training set accuracy for each kernel') 
+```
+
+``` {r acc_svm, echo = FALSE}
+## Estimate best model
+svm_fit = svm(formula = class ~ .,
+                 data = train_set,
+                 type = 'C-classification',
+                 kernel = kernel)
+
+y_hat_svm <- predict(svm_fit,test_set)
+## accuracy for best model
+acc_svm<-mean(y_hat_svm == test_set$class)
+```
+The `r kernel` kernel maximises accuracy on the **train_set** and this model has `r acc_svm` accuracy on the **test_set**.
+
+### 5. Decision Trees
+
+I train a decision tree on the **train_set** and optimise for the complexity parameter:
+```{r best_cp, acc_dt, imp_dt, fig.align="center", echo=TRUE}
+# train and optimize CP on train_set
+train_rpart <- train(class ~ .,method = "rpart",
+                  tuneGrid = data.frame(cp = seq(0, 0.05, len = 25)),
+                  data = train_set)
+
+#select best CP
+best_cp <- train_rpart$bestTune$cp
+y_hat_dt <- predict(train_rpart, test_set)
+acc_dt <- mean(y_hat_dt ==test_set$class)
+
+# get most variable importance
+imp_dt <- varImp(train_rpart)
+
+#plot CP selection
+ggplot(train_rpart)
+```
+The best complexity parameter is `r best_cp` and this model has accuracy of `r acc_dt` on the **test_set**. The corresponding decision tree and table with feature importance are shown below:
+```{r  fig.align="center", echo=FALSE}
+plot(train_rpart$finalModel, margin = 0.1)
+text(train_rpart$finalModel, cex = 0.75)
+```
+
+``` {r echo = FALSE}
+kable(imp_dt$importance, caption = 'Feature Importance')
+```
+
+### 6. Random Forests
+I train random forests and optimise  *'mtry'* over the range 50-300, in increments of 25, on the *train_set*.
+``` {r acc_rf, best_m, warning=FALSE, message=FALSE}
+## Download libraray
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+library(randomForest)
+
+## Set seed to ensure reproducability
+set.seed(1, sample.kind="Rounding")
+
+## train and optimise RF model
+train_rf <- train(class ~., train_set,
+              method = "rf",
+                nodesize = 1,
+              tuneGrid = data.frame(mtry = seq(50, 300, 25)))
+
+# select best mtry parameter
+best_m <- train_rf$bestTune$mtry
+
+#predict
+y_hat_rf <- predict(train_rf,test_set)
+acc_rf <- mean(y_hat_rf == test_set$class)
+
+#feature importance
+imp_rf <- varImp(train_rf)
+kable(imp_rf$importance, caption ='Feature Importance')
+```
+The optimal *mtry* value is `r best_m` and this model has `r acc_rf` accuracy on the **test_set**.
+
+### Summary of Individual Models
+
+So far we have estimated 6 models with **test_set** accuracy shown in the table below:
+``` {r acc_results, best_model, echo = FALSE}
+#capture all results so far
+acc_results <- data_frame(Method = "Naive Bayes", Accuracy = acc_nb)
+acc_results <- bind_rows(acc_results, data_frame(Method="LDA", Accuracy = acc_lda ))
+acc_results <- bind_rows(acc_results, data_frame(Method="KNN", Accuracy = acc_knn ))
+acc_results <- bind_rows(acc_results, data_frame(Method="SVM", Accuracy = acc_svm ))
+acc_results <- bind_rows(acc_results, data_frame(Method="Decision Tree", Accuracy = acc_dt ))
+acc_results <- bind_rows(acc_results, data_frame(Method="Random Forest", Accuracy = acc_rf ))
+kable(acc_results, caption = 'Summary of Model Accuracy')
+
+#get the best model
+best <- which.max(acc_results$Accuracy)
+best_model <- acc_results$Method[best]
+acc <- acc_results$Accuracy[best]
+```
+The `r best_model` is the best model with accuracy of `r acc` on the **test_set**.
+
+I will now try and beat this with an ensemble - this will be tough, since accuracy is already very high.
+
+## Ensemble modelling
+
+An ensemble model is a model that combines multiple other models to make the predictions. I create an emsemble model by giving each individual model a 'vote' on the correct prediction.  That is, for each obervation (ie, row) I take the mode of the indivual models' predictions. (Note that by chosing the mode there is a chance for two-way or three-way ties, but fortunately for this experiment there are no ties).
+
+Code for constructing the ensemble is shown below:
+``` {r  warning=FALSE, message=FALSE}
+## Download library for deriving mode and install
+if(!require(modeest)) install.packages("modeest", repos = "http://cran.us.r-project.org")
+library(modeest)
+
+## collate all predictions
+all_y_hat <- c(data.frame(y_hat_nb), data.frame(y_hat_lda),data.frame(y_hat_knn), 
+               data.frame(y_hat_svm),data.frame(y_hat_rf),data.frame(y_hat_svm),
+               data.frame(y_hat_dt))
+all_y_hat <- data.frame(all_y_hat)
+kable(head(all_y_hat), caption = 'Sample of all models before taking mode')
+```
+The most frequent prediction in row one is 'Hernia' and 'Normal' for row two.  So the ensemble predicts 'Hernia' for row one and 'Normal' for row two. The code for doing this is shown below:
+```{r  acc_en, warning=FALSE, message=FALSE}
+## get mode
+y_hat_final <- apply(all_y_hat[ ,1:length(all_y_hat)], 1, mfv)
+y_hat_final <- data.frame(y_hat_final)
+
+## get accuracy of ensemble
+acc_en <- mean(y_hat_final == data.frame(test_set$class))
+acc_results <- bind_rows(acc_results, data_frame(Method="Ensemble", Accuracy = acc_en ))
+```
+## Results
+
+All of the model perform well in terms of accuracy of predictions. Full summary shown below:
+```{r echo=FALSE}
+kable(acc_results, caption = 'Model Accuracy - with ensemble')
+```
+The ensemble model has `r acc_en` accuracy on the **test_set**, matching the best individual model (`r best_model`).
+
+## Conslusion
+
+In this report I demonstrate how to construct an ensemble using multiple models. The final ensemble performed well, but could only match and not exceed the single best individual mdoel.
+
+I should note that initially I did not set the seed and hence was getting varying results with each 'knit' of my report. The results were not stable and the `r best_model` was not always the best model. The sample size is realatively small (~400 observations). This instability could be investigated in the future by extending the dataset with more observations.
+
+Another area for future work would be to determine how to break ties if the ensemble had the same number of 'votes' for two or three predictions. I considered considered using **train_set** accuracy as a voting weight; hence a model that was more accurate in training would have a greater contribution to the final 'vote'. Fortunately, for this dataset, tie-breaking was not necessary.
+
+I have only considered accuracy, but perhaps should also consider precision and recall. This is especially relevent in medicine since the cost of a false negative (ie, an undiagnosed condition) could be very high for the patient.
+
+
